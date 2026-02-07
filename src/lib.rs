@@ -17,7 +17,7 @@ pub struct VseprOptimizer {
 impl Default for VseprOptimizer {
     fn default() -> Self {
         Self {
-            iterations: 1000,
+            iterations: 1500, // Increased iterations for torsion convergence
             force_constant: 0.15,
         }
     }
@@ -73,6 +73,7 @@ impl VseprOptimizer {
             self.apply_bond_constraints(atoms, bonds, &positions, &mut forces);
             self.apply_angle_constraints(n, &adj, &geometries, &positions, &mut forces);
             self.apply_planarity_constraints(n, &adj, &geometries, &positions, &mut forces);
+            self.apply_torsion_constraints(n, &adj, bonds, &geometries, &positions, &mut forces); // New!
             self.apply_repulsion_constraints(n, &adj, &positions, &mut forces);
 
             // 3. Update coordinates
@@ -101,28 +102,25 @@ impl VseprOptimizer {
             let p2 = positions[j];
             let dist = p1.dist(p2);
             
-            // Calculate ideal bond length based on covalent radii.
             let r1 = get_covalent_radius(atoms[i].atomic_number());
             let r2 = get_covalent_radius(atoms[j].atomic_number());
-            let raw_sum = (r1 + r2) / 100.0; // Convert pm to Angstroms
+            let raw_sum = (r1 + r2) / 100.0;
 
-            // Scale based on bond order (bond order correction).
             let order = bond.get_bond_order();
             let scale_factor = if order >= 3.0 {
-                0.82 // Triple bond
+                0.82
             } else if order >= 2.0 {
-                0.88 // Double bond
+                0.88
             } else if order >= 1.5 {
-                0.92 // Aromatic bond
+                0.92
             } else {
-                1.00 // Single bond
+                1.00
             };
 
             let target = raw_sum * scale_factor;
 
             if dist > 0.001 {
                 let diff = target - dist;
-                // Strong spring constant for bonds
                 let force = p1.sub(p2).normalize().mul(diff * 1.2);
                 forces[i] = forces[i].add(force);
                 forces[j] = forces[j].sub(force);
@@ -146,7 +144,6 @@ impl VseprOptimizer {
             }
 
             let ideal_angle = geometries[i].ideal_angle();
-            // Pre-calculate cos of ideal angle
             let cos_theta = ideal_angle.cos();
 
             for a_idx in 0..neighbors.len() {
@@ -163,9 +160,6 @@ impl VseprOptimizer {
                     let r1 = v_i.length();
                     let r2 = v_j.length();
 
-                    // Law of cosines to find the ideal 1-3 distance based on CURRENT bond lengths.
-                    // Note: While user noted this fluctuates, it's a standard approximation in simple relaxation.
-                    // Using fixed ideal bond lengths here might conflict with actual bond constraints.
                     let target_d = (r1 * r1 + r2 * r2 - 2.0 * r1 * r2 * cos_theta)
                         .max(0.0)
                         .sqrt();
@@ -173,7 +167,6 @@ impl VseprOptimizer {
                     let current_d = p_i.dist(p_j);
                     if current_d > 0.001 {
                         let diff = target_d - current_d;
-                        // Angle forces are weaker than bonds
                         let force = p_i.sub(p_j).normalize().mul(diff * 0.2);
                         forces[ni] = forces[ni].add(force);
                         forces[nj] = forces[nj].sub(force);
@@ -184,7 +177,6 @@ impl VseprOptimizer {
     }
 
     /// Applies Planarity Constraints (Improper Torsions) for sp2 centers.
-    /// This is crucial for aromatic rings (Benzene) and double bonds.
     fn apply_planarity_constraints(
         &self,
         n: usize,
@@ -194,7 +186,6 @@ impl VseprOptimizer {
         forces: &mut [Vec3],
     ) {
         for i in 0..n {
-            // Only apply to Trigonal Planar (SN=3) atoms with exactly 3 neighbors.
             if let Geometry::TrigonalPlanar = geometries[i] {
                 let neighbors = &adj[i];
                 if neighbors.len() == 3 {
@@ -203,26 +194,18 @@ impl VseprOptimizer {
                     let p2 = positions[neighbors[1].0];
                     let p3 = positions[neighbors[2].0];
 
-                    // Define the plane using the three neighbors (p1, p2, p3).
-                    // Normal vector N = (p2 - p1) x (p3 - p1)
                     let v12 = p2.sub(p1);
                     let v13 = p3.sub(p1);
                     let normal = v12.cross(v13).normalize();
 
-                    // If normal is zero length (collinear neighbors), skip.
                     if normal.length_squared() < 1e-6 {
                         continue;
                     }
 
-                    // Calculate distance of central atom p0 from the plane.
-                    // Distance d = dot(p0 - p1, normal)
                     let v10 = p0.sub(p1);
                     let dist_from_plane = v10.dot(normal);
 
-                    // Force to push p0 back onto the plane.
-                    // p0 moves along -normal * dist
-                    // Neighbors move along +normal * (dist / 3) to conserve momentum roughly.
-                    let correction = normal.mul(-dist_from_plane * 0.5); // 0.5 is stiffness
+                    let correction = normal.mul(-dist_from_plane * 0.5);
                     
                     forces[i] = forces[i].add(correction);
                     
@@ -230,6 +213,90 @@ impl VseprOptimizer {
                     forces[neighbors[0].0] = forces[neighbors[0].0].add(recoil);
                     forces[neighbors[1].0] = forces[neighbors[1].0].add(recoil);
                     forces[neighbors[2].0] = forces[neighbors[2].0].add(recoil);
+                }
+            }
+        }
+    }
+
+    /// Applies Dihedral (Torsion) Constraints (1-4 interactions).
+    /// Focuses on keeping aromatic and double bonds planar (0 or 180 degrees).
+    fn apply_torsion_constraints<B: BondTrait>(
+        &self,
+        _n: usize,
+        adj: &[Vec<(usize, usize)>],
+        bonds: &[B],
+        geometries: &[Geometry],
+        positions: &[Vec3],
+        forces: &mut [Vec3],
+    ) {
+        for bond in bonds {
+            let (j, k) = bond.get_atom_indices();
+            let order = bond.get_bond_order();
+
+            // Only apply strong torsion constraints for Aromatic (1.5) and Double (2.0) bonds.
+            if order < 1.5 { continue; }
+            // Both atoms must be sp2 (TrigonalPlanar) for planar constraint.
+            if !matches!(geometries[j], Geometry::TrigonalPlanar) || 
+               !matches!(geometries[k], Geometry::TrigonalPlanar) {
+                continue;
+            }
+
+            let neighbors_j = &adj[j];
+            let neighbors_k = &adj[k];
+
+            for &(i, _) in neighbors_j {
+                if i == k { continue; } // Skip the bond itself
+                for &(l, _) in neighbors_k {
+                    if l == j { continue; } // Skip the bond itself
+
+                    // Torsion i-j-k-l
+                    let p_i = positions[i];
+                    let p_j = positions[j];
+                    let p_k = positions[k];
+                    let p_l = positions[l];
+
+                    // Vectors: b1=i->j, b2=j->k, b3=k->l
+                    let b1 = p_j.sub(p_i);
+                    let b2 = p_k.sub(p_j);
+                    let b3 = p_l.sub(p_k);
+
+                    // Normal vectors to planes defined by (i,j,k) and (j,k,l)
+                    let n1 = b1.cross(b2);
+                    let n2 = b2.cross(b3);
+                    
+                    if n1.length_squared() < 1e-6 || n2.length_squared() < 1e-6 { continue; }
+
+                    let n1_norm = n1.normalize();
+                    let n2_norm = n2.normalize();
+
+                    // Cosine of dihedral angle
+                    let _cos_phi = n1_norm.dot(n2_norm);
+                    // Sine of dihedral angle (roughly, using cross product direction)
+                    let sin_phi = n1_norm.cross(n2_norm).dot(b2.normalize());
+
+                    // Target: Planar (0 or 180 degrees)
+                    // We want to minimize sin_phi (make planes parallel).
+                    // Force is proportional to sin(phi).
+                    
+                    // Simple restoring force towards closest planar configuration (0 or 180).
+                    // If sin_phi is positive, torque direction is opposite.
+                    
+                    let strength = 0.05; // Torsion is weaker than bonds/angles
+                    let torque = sin_phi * strength;
+
+                    // Apply rotational forces (simplified perpendicular forces)
+                    // Push i and l towards the plane defined by j-k bond and ideal vector.
+                    
+                    // Direction perpendicular to the planes
+                    let f_i = n1_norm.mul(-torque);
+                    let f_l = n2_norm.mul(torque);
+
+                    forces[i] = forces[i].add(f_i);
+                    forces[l] = forces[l].add(f_l);
+                    
+                    // Recoil on central atoms (simplified conservation)
+                    forces[j] = forces[j].sub(f_i);
+                    forces[k] = forces[k].sub(f_l);
                 }
             }
         }
@@ -245,7 +312,6 @@ impl VseprOptimizer {
     ) {
         let min_repulsion_d = 1.2;
         if n < 100 {
-            // Small systems: Use simple O(N^2) loop.
             for i in 0..n {
                 for j in (i + 1)..n {
                     if adj[i].iter().any(|&(neighbor, _)| neighbor == j) {
@@ -255,12 +321,10 @@ impl VseprOptimizer {
                 }
             }
         } else {
-            // Large systems (Polymers, etc.): Use Spatial Hashing (O(N)).
             self.apply_spatial_repulsion(n, positions, adj, forces, min_repulsion_d);
         }
     }
 
-    /// Calculates and applies repulsion force between two atoms if they are too close.
     #[inline]
     fn apply_repulsion(
         &self,
@@ -277,7 +341,6 @@ impl VseprOptimizer {
         
         if dist_sq < min_d * min_d && dist_sq > 0.0001 {
             let dist = dist_sq.sqrt();
-            // Increased repulsion stiffness from 0.3 to 0.8
             let force_mag = (min_d - dist).powi(2) * 0.8;
             let force = diff_v.normalize().mul(force_mag);
             forces[i] = forces[i].add(force);
@@ -285,7 +348,6 @@ impl VseprOptimizer {
         }
     }
 
-    /// High-performance repulsion calculation using a grid-based spatial partition.
     fn apply_spatial_repulsion(
         &self,
         _n: usize,
@@ -294,7 +356,6 @@ impl VseprOptimizer {
         forces: &mut [Vec3],
         min_d: f64,
     ) {
-        // Compute bounding box to define grid dimensions.
         let mut min_p = positions[0];
         let mut max_p = positions[0];
         for p in positions.iter().skip(1) {
@@ -315,7 +376,6 @@ impl VseprOptimizer {
             )
         };
 
-        // Populate the grid with atom indices.
         let mut cells = vec![Vec::new(); dim_x * dim_y * dim_z];
         for (i, &p) in positions.iter().enumerate() {
             let (ix, iy, iz) = get_cell_idx(p);
@@ -323,7 +383,6 @@ impl VseprOptimizer {
             cells[idx].push(i);
         }
 
-        // Search neighboring 27 cells (self + neighbors) for potential clashes.
         for ix in 0..dim_x {
             for iy in 0..dim_y {
                 for iz in 0..dim_z {
@@ -356,7 +415,7 @@ impl VseprOptimizer {
                                         for &j in neighbor_atoms {
                                             if i >= j {
                                                 continue;
-                                            } // Avoid double counting and self-repulsion.
+                                            }
                                             if adj[i].iter().any(|&(neighbor, _)| neighbor == j) {
                                                 continue;
                                             }
@@ -417,57 +476,85 @@ mod tests {
     }
 
     #[test]
-    fn test_benzene_geometry() {
-        // Benzene: C6H6. Ring of 6 carbons.
-        // Simplified test without Hydrogens for basic ring planarity and distance.
+    fn test_benzene_geometry_strict() {
+        // Strict Benzene Test: C6H6
+        // Initial state is highly distorted (zigzag / puckered)
         let mut atoms = Vec::new();
-        // Initialize randomly or in a non-planar way
         for i in 0..6 {
+            // Highly distorted initial coordinates
             atoms.push(MyAtom {
                 pos: [
-                    (i as f64).cos() * 1.4 + (i % 2) as f64 * 0.2, 
+                    (i as f64).cos() * 1.4, 
                     (i as f64).sin() * 1.4, 
-                    (i % 2) as f64 * 0.5 // Zig-zag (puckered) initial state
+                    (i % 2) as f64 * 0.8 // Large z-displacement (0.8 A)
                 ],
                 element: 6
             });
         }
+        // Hydrogens attached with random z-offsets
+        for i in 0..6 {
+             atoms.push(MyAtom { 
+                 pos: [
+                     (i as f64).cos() * 2.4, 
+                     (i as f64).sin() * 2.4, 
+                     ((i + 1) % 2) as f64 * -0.5 
+                 ], 
+                 element: 1 
+             });
+        }
+
         let mut bonds = Vec::new();
+        // C-C aromatic bonds
         for i in 0..6 {
-            bonds.push(MyBond { pair: (i, (i + 1) % 6), order: 1.5 }); // Aromatic bond
+            bonds.push(MyBond { pair: (i, (i + 1) % 6), order: 1.5 });
+        }
+        // C-H bonds
+        for i in 0..6 {
+            bonds.push(MyBond { pair: (i, 6 + i), order: 1.0 });
         }
 
-        // Add dummy Hydrogens to ensure C is sp2 (SN=3).
-        // Each C needs 1 H.
-        for i in 0..6 {
-             atoms.push(MyAtom { pos: [0.0, 0.0, 0.0], element: 1 });
-             bonds.push(MyBond { pair: (i, 6 + i), order: 1.0 });
-        }
+        // Run optimization with increased iterations for torsion convergence
+        let optimizer = VseprOptimizer { iterations: 2000, force_constant: 0.1 };
+        optimizer.optimize(&mut atoms, &bonds);
 
-        VseprOptimizer::new().optimize(&mut atoms, &bonds);
-
-        // Check C-C bond lengths
+        // 1. Check C-C bond lengths (Target ~1.40 A)
         let p0 = Vec3::from(atoms[0].pos);
         let p1 = Vec3::from(atoms[1].pos);
         let dist = p0.dist(p1);
         println!("Benzene C-C dist: {:.3}", dist);
-        // Ideal aromatic C-C is ~1.40 A. Normal single is 1.54.
-        // Our logic: (0.76+0.76) * 0.92 = 1.398. Should be close to 1.40.
         assert!((dist - 1.40).abs() < 0.05);
 
-        // Check Planarity
-        // Check if z-coordinates are roughly similar (after optimization, it might rotate, 
-        // so checking dot product of normals is better, or just visual inspection via debug print).
-        // For simplicity in this test, we check if C0, C1, C2, C3 form a flat plane.
-        let p2 = Vec3::from(atoms[2].pos);
-        let p3 = Vec3::from(atoms[3].pos);
-        // Torsion angle or just distance of p3 from plane(p0, p1, p2)
-        let v01 = p1.sub(p0);
-        let v12 = p2.sub(p1);
-        let normal = v01.cross(v12).normalize();
-        let v23 = p3.sub(p2);
-        let dist_from_plane = v23.dot(normal).abs();
-        println!("Benzene flatness error: {:.3}", dist_from_plane);
-        assert!(dist_from_plane < 0.1);
+        // 2. Check Planarity (Strict)
+        // Fit a plane to all 6 Carbon atoms and check max deviation.
+        // Simple check: Normal vector of triangle (0,2,4) vs (1,3,5) should be parallel,
+        // and distance of atoms to the average plane should be small.
+        
+        // Let's check average z-deviation after aligning to principal axes is hard in simple test.
+        // Instead, check local torsion angles or point-plane distance.
+        // Here we use the cross product method for all consecutive 4 atoms.
+        
+        let mut max_deviation = 0.0;
+        for i in 0..6 {
+            let p_i = Vec3::from(atoms[i].pos); // C
+            let p_j = Vec3::from(atoms[(i+1)%6].pos); // C
+            let p_k = Vec3::from(atoms[(i+2)%6].pos); // C
+            let p_l = Vec3::from(atoms[(i+3)%6].pos); // C
+            
+            // Dihedral i-j-k-l
+            let b1 = p_j.sub(p_i);
+            let b2 = p_k.sub(p_j);
+            let b3 = p_l.sub(p_k);
+            let n1 = b1.cross(b2).normalize();
+            let n2 = b2.cross(b3).normalize();
+            let sin_phi = n1.cross(n2).length(); // If planar, sin_phi ~ 0
+            
+            if sin_phi > max_deviation {
+                max_deviation = sin_phi;
+            }
+        }
+        
+        println!("Max dihedral deviation (sin_phi): {:.4}", max_deviation);
+        // Expect extremely flat structure (deviation < 0.1 radians ~ 5.7 degrees)
+        assert!(max_deviation < 0.1);
     }
 }
