@@ -1,19 +1,18 @@
 # vsepr-rs
 
-A lightweight, high-performance, and zero-dependency Rust crate for molecular geometry optimization based on **VSEPR (Valence Shell Electron Pair Repulsion)** theory.
+A lightweight, high-performance molecular geometry optimizer based on **VSEPR (Valence Shell Electron Pair Repulsion)** theory and a lightweight force field.
 
 ## Features
 
-- **Zero Dependency:** Built purely on Rust's standard library for maximum portability and fast compilation.
-- **Generic Interface:** Uses traits (`AtomTrait`, `BondTrait`) so you can optimize your own data structures without conversion.
-- **Fast Optimization:**
-    - Uses a constraint-based relaxation engine (Force Field style).
-    - **Spatial Hashing (O(N)):** Automatically switches to a grid-based spatial partition for large molecules or polymers (e.g., 100+ atoms) to maintain high performance.
-- **Chemically Aware:**
-    - Calculates Steric Numbers (SN) based on atomic numbers, bond orders, and formal charges.
-    - Considers covalent radii for realistic bond lengths.
-    - Prevents steric clashing and hydrogen overcrowding.
-- **Strained Rings Support:** Correctly handles ring strain (e.g., cyclopropane) by balancing VSEPR ideal angles with distance constraints.
+- **VSEPR-Based Reasoning:** Automatically determines ideal bond angles and local geometries based on Steric Numbers (SN), considering valence electrons, bond orders, and formal charges.
+- **Generic Interface:** Uses traits (`AtomTrait`, `BondTrait`) allowing you to optimize your own data structures directly without conversion.
+- **Robust Initialization:** Includes deterministic jitter to break symmetry, enabling reliable convergence even from origin-stacked or perfectly linear starting coordinates.
+- **Physics-Aware Refinement:**
+    - Corrects bond lengths based on bond order and covalent radii.
+    - Maintains local planarity for sp2 centers.
+    - Includes dihedral (1-4 torsion) constraints for aromatic systems.
+    - Prevents steric clashing with non-bonded repulsion.
+- **Zero Dependency:** Built purely on the Rust standard library for maximum portability and fast compilation.
 
 ## Installation
 
@@ -21,7 +20,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vsepr-rs = "0.1.0"
+vsepr-rs = "0.1.3"
 ```
 
 ## Quick Start
@@ -55,8 +54,8 @@ impl BondTrait for MyBond {
 fn main() {
     let mut atoms = vec![
         MyAtom { pos: [0.0, 0.0, 0.0], element: 8 }, // Oxygen
-        MyAtom { pos: [1.0, 0.0, 0.0], element: 1 }, // Hydrogen
-        MyAtom { pos: [0.0, 1.0, 0.0], element: 1 }, // Hydrogen
+        MyAtom { pos: [0.0, 0.0, 0.0], element: 1 }, // Hydrogen
+        MyAtom { pos: [0.0, 0.0, 0.0], element: 1 }, // Hydrogen
     ];
     let bonds = vec![
         MyBond { pair: (0, 1), order: 1.0 },
@@ -66,20 +65,15 @@ fn main() {
     let optimizer = VseprOptimizer::new();
     optimizer.optimize(&mut atoms, &bonds);
 
-    println!("Optimized O-H1 position: {:?}", atoms[1].pos);
+    println!("Optimized water coordinates established.");
 }
 ```
 
-## Performance
+## How it Works
 
-`vsepr-rs` is designed to be fast enough for real-time applications and large-scale polymer research.
-
-| Molecule | Atoms | Time (Release) |
-| :--- | :--- | :--- |
-| Methane ($CH_4$) | 5 | ~0.3 ms |
-| Polyethylene ($C_{200}H_{402}$) | 602 | ~140 ms |
-
-The O(N) spatial partitioning ensures that the calculation time scales linearly with the size of the molecule for large systems.
+1. **Topology Analysis:** Builds an adjacency list and calculates VSEPR geometries for each center.
+2. **Deterministic Jitter:** Adds a small, reproducible offset to coordinates to break symmetry traps.
+3. **Iterative Relaxation:** Applies a lightweight force field including bond springs, VSEPR angle springs, planarity forces, and non-bonded repulsion until the structure settles.
 
 ## License
 

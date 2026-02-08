@@ -1,18 +1,18 @@
 use crate::traits::{get_valence_electrons, AtomTrait, BondTrait};
 
-/// Representing standard VSEPR geometries based on Steric Numbers (SN).
+/// Standard VSEPR geometries based on Steric Numbers (SN).
 #[derive(Debug, Clone, Copy)]
 pub enum Geometry {
-    Linear,                // SN=2 (180 deg)
-    TrigonalPlanar,        // SN=3 (120 deg)
-    Tetrahedral,           // SN=4 (109.5 deg)
-    TrigonalBipyramidal,   // SN=5 (90/120 deg)
-    Octahedral,            // SN=6 (90 deg)
-    PentagonalBipyramidal, // SN=7 (72/90 deg)
+    Linear,                // SN=2
+    TrigonalPlanar,        // SN=3
+    Tetrahedral,           // SN=4
+    TrigonalBipyramidal,   // SN=5
+    Octahedral,            // SN=6
+    PentagonalBipyramidal, // SN=7
 }
 
 impl Geometry {
-    /// Determines the geometry based on the Steric Number (SN).
+    /// Determines the geometry based on the Steric Number.
     pub fn from_steric_number(sn: usize) -> Self {
         match sn {
             0..=2 => Geometry::Linear,
@@ -24,22 +24,21 @@ impl Geometry {
         }
     }
 
-    /// Returns the ideal bond angle in radians for the geometry.
+    /// Returns the ideal bond angle in radians.
     pub fn ideal_angle(&self) -> f64 {
         match self {
             Geometry::Linear => std::f64::consts::PI,
             Geometry::TrigonalPlanar => 2.0 * std::f64::consts::PI / 3.0,
             Geometry::Tetrahedral => (109.4712_f64).to_radians(),
-            Geometry::TrigonalBipyramidal => (90.0_f64).to_radians(), // Simplified representation.
+            Geometry::TrigonalBipyramidal => (90.0_f64).to_radians(),
             Geometry::Octahedral => std::f64::consts::PI / 2.0,
             Geometry::PentagonalBipyramidal => (72.0_f64).to_radians(),
         }
     }
 }
 
-/// Calculates the Steric Number (SN) for a given atom using the VSEPR formula.
-/// SN = (Number of bonded atoms) + (Number of lone pairs)
-/// Lone pairs = (Valence electrons - Charge - Shared electrons) / 2
+/// Calculates the Steric Number (SN) using valence electrons and bond topology.
+/// SN = (Bonded Atoms) + (Lone Pairs)
 pub fn calculate_steric_number<A: AtomTrait, B: BondTrait>(
     atom_idx: usize,
     atoms: &[A],
@@ -60,9 +59,6 @@ pub fn calculate_steric_number<A: AtomTrait, B: BondTrait>(
         }
     }
 
-    // Lone pairs count. Max(0.0) is used to prevent negative counts in extreme cases.
-    let lone_pairs =
-        ((valence_electrons as i32 - charge) as f64 - electron_sum).max(0.0) / 2.0;
-
+    let lone_pairs = ((valence_electrons as i32 - charge) as f64 - electron_sum).max(0.0) / 2.0;
     bonded_atoms_count + (lone_pairs.round() as usize)
 }
