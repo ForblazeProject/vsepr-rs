@@ -1,6 +1,6 @@
 [package]
 name = "vsepr-rs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "A lightweight, high-performance molecular geometry optimizer based on VSEPR theory."
 license = "MIT OR Apache-2.0"
