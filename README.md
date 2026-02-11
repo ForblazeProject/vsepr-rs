@@ -1,6 +1,8 @@
 # vsepr-rs
 
-A lightweight, high-performance molecular geometry optimizer based on **VSEPR (Valence Shell Electron Pair Repulsion)** theory and a lightweight force field.
+A lightweight, high-performance molecular geometry optimizer based on **VSEPR (Valence Shell Electron Pair Repulsion)** theory.
+
+`vsepr-rs` is designed as a **scaffolder** or **pre-optimizer**. It quickly transforms raw or overlapping coordinates into a chemically sensible 3D structure that can then be passed to more rigorous force fields like UFF (Universal Force Field) for final refinement.
 
 ## Features
 
@@ -20,7 +22,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vsepr-rs = "0.1.3"
+vsepr-rs = "1.0.0"
 ```
 
 ## Quick Start

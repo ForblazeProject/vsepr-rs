@@ -51,6 +51,13 @@ impl Vec3 {
     pub fn dist(self, other: Self) -> f64 {
         self.sub(other).length()
     }
+
+    /// Calculates the angle (in radians) between this vector and another.
+    pub fn angle(self, other: Self) -> f64 {
+        let dot = self.normalize().dot(other.normalize());
+        // Clamp to avoid NaN from floating point precision issues.
+        dot.clamp(-1.0, 1.0).acos()
+    }
 }
 
 impl From<[f64; 3]> for Vec3 {
