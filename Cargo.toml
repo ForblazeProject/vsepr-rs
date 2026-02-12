@@ -7,7 +7,7 @@ description = "A lightweight, high-performance molecular geometry optimizer base
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ForblazeProject/vsepr-rs.git"
 keywords = ["chemistry", "molecule", "vsepr", "geometry", "polymer"]
-categories = ["science", "science::chemistry"]
+categories = ["science"]
 readme = "README.md"
 
 [dependencies]
