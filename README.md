@@ -18,7 +18,11 @@ A lightweight, high-performance molecular geometry optimizer based on **VSEPR (V
 
 ## Installation
 
-Add this to your `Cargo.toml`:
+```bash
+cargo add vsepr-rs
+```
+
+Or add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -32,6 +36,7 @@ Implement `AtomTrait` and `BondTrait` for your structures and run the optimizer.
 ```rust
 use vsepr_rs::{VseprOptimizer, AtomTrait, BondTrait};
 
+#[derive(Debug)]
 struct MyAtom {
     pos: [f64; 3],
     element: usize,
@@ -54,6 +59,7 @@ impl BondTrait for MyBond {
 }
 
 fn main() {
+    // Water molecule: O-H, O-H
     let mut atoms = vec![
         MyAtom { pos: [0.0, 0.0, 0.0], element: 8 }, // Oxygen
         MyAtom { pos: [0.0, 0.0, 0.0], element: 1 }, // Hydrogen
@@ -67,7 +73,22 @@ fn main() {
     let optimizer = VseprOptimizer::new();
     optimizer.optimize(&mut atoms, &bonds);
 
-    println!("Optimized water coordinates established.");
+    for (i, atom) in atoms.iter().enumerate() {
+        println!("Atom {}: {:?} pos: {:?}", i, atom.element, atom.pos);
+    }
+}
+```
+
+## Testing Your Implementation
+
+If you are implementing custom traits, you can verify your integration by checking if the distances between atoms after optimization approach their covalent sums. 
+
+```rust
+#[test]
+fn test_integration() {
+    // 1. Setup your atoms/bonds
+    // 2. Run optimizer.optimize(&mut atoms, &bonds)
+    // 3. Assert distance between atoms is reasonable
 }
 ```
 
