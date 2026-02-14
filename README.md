@@ -1,5 +1,7 @@
 # vsepr-rs
 
+![Crates.io Version](https://img.shields.io/crates/v/vsepr-rs)
+
 A lightweight, high-performance molecular geometry optimizer based on **VSEPR (Valence Shell Electron Pair Repulsion)** theory.
 
 `vsepr-rs` is designed as a **scaffolder** or **pre-optimizer**. It quickly transforms raw or overlapping coordinates into a chemically sensible 3D structure that can then be passed to more rigorous force fields like UFF (Universal Force Field) for final refinement.
